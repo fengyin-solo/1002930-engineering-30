@@ -9,6 +9,9 @@
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "pinia": "^2.1.7",
     "vue": "^3.4.21",

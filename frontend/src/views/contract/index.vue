@@ -7,7 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记维保合同</button>
-        <button class="btn" type="button" @click="exportRows">导出维保合同清单</button>
+        <button class="btn" type="button" :disabled="exporting" @click="exportRows">导出维保合同清单</button>
       </div>
     </header>
 
@@ -23,7 +23,7 @@
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
       </label>
-      <button class="btn" type="submit">查询</button>
+      <button class="btn" type="submit" :disabled="loading">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
@@ -38,34 +38,49 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-for="action in actions" :key="action">
+              <button
+                class="link"
+                type="button"
+                :disabled="isActionPending(row, action)"
+                @click="runAction(action, row)"
+              >
+                {{ action }}
+              </button>
+              <button
+                v-if="actionNotice(row, action)"
+                class="link retry-link"
+                type="button"
+                @click="retryAction(row, action)"
+              >重试</button>
+              <span v-if="actionNotice(row, action)" class="error-text row-error">{{ actionNotice(row, action)?.text }}</span>
+            </template>
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无维保合同数据，可先登记维保合同</td>
+          <td v-if="loadFailed" :colspan="columns.length + 1" class="empty-state">数据未取到，可重试上一次请求</td>
+          <td v-else :colspan="columns.length + 1" class="empty-state">暂无维保合同数据，可先登记维保合同</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条维保合同记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span class="foot-controls">
+        <i v-if="loading" class="muted-text">加载中…</i>
+        <button v-if="loading" class="link" type="button" @click="cancelList">取消</button>
+        <button v-else-if="listNotice && listNotice.retryable" class="link" type="button" @click="retryList">重试</button>
+        <span v-if="listNotice" class="error-text">{{ listNotice.text }}</span>
+      </span>
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
+import { notify } from '@/api/http'
+import { useModuleResource } from '@/composables/useModuleResource'
 
 type Row = Record<string, string | number | null>
 
@@ -74,56 +89,33 @@ const columns = ["合同编号", "签约单位", "维保范围", "合同金额",
 const actions = ["签订合同", "到期续签", "终止合同"]
 const statuses = ["待签约", "执行中", "即将到期", "已终止"]
 const stats = [{"label": "执行中合同", "value": 0}, {"label": "即将到期合同", "value": 0}, {"label": "已终止合同", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
+const {
+  rows,
+  total,
+  filters,
+  loading,
+  loadFailed,
+  exporting,
+  listNotice,
+  reload,
+  retryList,
+  cancelList,
+  runAction,
+  retryAction,
+  actionNotice,
+  exportRows,
+  isActionPending,
+} = useModuleResource(ENDPOINT, '维保合同')
 
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
+function resetFilters() {
+  for (const key of Object.keys(filters)) delete filters[key]
+  reload()
 }
 
 function openCreate() {
-  errorMessage.value = '维保合同登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('维保合同动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '维保合同操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('维保合同列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '维保合同列表读取失败'
-  }
+  notify('info', '维保合同登记入口尚未接入审批流', '维保合同')
 }
 
 onMounted(reload)

@@ -7,7 +7,7 @@
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记隐患记录</button>
-        <button class="btn" type="button" @click="exportRows">导出隐患排查清单</button>
+        <button class="btn" type="button" :disabled="exporting" @click="exportRows">导出隐患排查清单</button>
       </div>
     </header>
 
@@ -23,7 +23,7 @@
         <span>{{ field }}</span>
         <input v-model="filters[field]" :placeholder="`按${field}检索`" />
       </label>
-      <button class="btn" type="submit">查询</button>
+      <button class="btn" type="submit" :disabled="loading">查询</button>
       <button class="btn ghost" type="button" @click="resetFilters">重置条件</button>
     </form>
 
@@ -38,34 +38,49 @@
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
-            <button
-              v-for="action in actions"
-              :key="action"
-              class="link"
-              type="button"
-              @click="runAction(action, row)"
-            >
-              {{ action }}
-            </button>
+            <template v-for="action in actions" :key="action">
+              <button
+                class="link"
+                type="button"
+                :disabled="isActionPending(row, action)"
+                @click="runAction(action, row)"
+              >
+                {{ action }}
+              </button>
+              <button
+                v-if="actionNotice(row, action)"
+                class="link retry-link"
+                type="button"
+                @click="retryAction(row, action)"
+              >重试</button>
+              <span v-if="actionNotice(row, action)" class="error-text row-error">{{ actionNotice(row, action)?.text }}</span>
+            </template>
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无隐患排查数据，可先登记隐患记录</td>
+          <td v-if="loadFailed" :colspan="columns.length + 1" class="empty-state">数据未取到，可重试上一次请求</td>
+          <td v-else :colspan="columns.length + 1" class="empty-state">暂无隐患排查数据，可先登记隐患记录</td>
         </tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条隐患排查记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span class="foot-controls">
+        <i v-if="loading" class="muted-text">加载中…</i>
+        <button v-if="loading" class="link" type="button" @click="cancelList">取消</button>
+        <button v-else-if="listNotice && listNotice.retryable" class="link" type="button" @click="retryList">重试</button>
+        <span v-if="listNotice" class="error-text">{{ listNotice.text }}</span>
+      </span>
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
+import { notify } from '@/api/http'
+import { useModuleResource } from '@/composables/useModuleResource'
 
 type Row = Record<string, string | number | null>
 
@@ -74,56 +89,33 @@ const columns = ["隐患编号", "所在设备", "隐患类别", "隐患等级",
 const actions = ["安排整改", "开始整改", "验收消除"]
 const statuses = ["待整改", "整改中", "待验收", "已消除"]
 const stats = [{"label": "待整改隐患", "value": 0}, {"label": "整改中隐患", "value": 0}, {"label": "已消除隐患", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
+const {
+  rows,
+  total,
+  filters,
+  loading,
+  loadFailed,
+  exporting,
+  listNotice,
+  reload,
+  retryList,
+  cancelList,
+  runAction,
+  retryAction,
+  actionNotice,
+  exportRows,
+  isActionPending,
+} = useModuleResource(ENDPOINT, '隐患排查')
 
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
+function resetFilters() {
+  for (const key of Object.keys(filters)) delete filters[key]
+  reload()
 }
 
 function openCreate() {
-  errorMessage.value = '隐患记录登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('隐患排查动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '隐患排查操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('隐患记录列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '隐患排查列表读取失败'
-  }
+  notify('info', '隐患记录登记入口尚未接入审批流', '隐患排查')
 }
 
 onMounted(reload)

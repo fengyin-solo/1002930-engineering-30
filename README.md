@@ -76,3 +76,40 @@ npm run dev
   `backend/app/routers/<模块>.py`，业务规则在 `backend/app/services/<模块>.py`。
 - 列表接口统一返回 `{ items, total, page, size }`，动作接口统一返回 `{ ok, message }`。
 - 状态流转只允许在 `app/services` 里改，路由层不做业务判断。
+
+### 前端请求层约定（统一入口，不再各页各写一套）
+
+所有 HTTP 请求只允许从 `frontend/src/api/http.ts` 走（旧的 `@/api/client`
+仅作兼容再导出），模块页统一使用 `src/composables/useModuleResource.ts`：
+
+- **身份一处取**：令牌只存 `src/stores/session.ts`（sessionStorage 单条序列化），
+  请求头由 http 层统一注入，页面不得自行拼装。退出 / 401 立即清空身份并
+  `cancelAllRequests()` 取消全部在途请求，旧令牌不再随请求发出。
+- **错误分档**（`ApiError.kind`）：`timeout`（默认 10s，`VITE_HTTP_TIMEOUT`
+  可配）、`offline`（断网 / 连接失败）、`http`（非 2xx，附状态码与服务端
+  detail）、`business`（HTTP 200 但响应体 `ok:false`，不可重试）、
+  `aborted`（取消 / 被新请求顶替，静默）。非 2xx 一律抛错，不允许当成功继续走。
+- **统一回显**：失败原因只登记到 `src/stores/notice.ts` 的 `latest`，
+  顶栏 `NoticeBar`、页脚、其它页面读到的是同一份；成功后自动撤下对应原因。
+- **从断掉那次接着取**：同 tag 的 GET 新请求顶掉旧请求（旧的静默取消），
+  tag 留档最近一次入参，“重试”按原入参重发（筛选条件不丢）。
+- **并发提交只放行一次**：同动作的非 GET 请求按 `方法+地址+请求体` 自动合并，
+  复用同一个响应；在途期间按钮禁用。
+- **重试 / 取消同一套**：`retry(tag)` / `cancel(tag)` 与超时共用
+  AbortController；可重试性由分档决定（业务校验失败不提供重试）。
+- 页面取数失败不得用假数据兜底，空表格区分为“暂无数据”与“数据未取到”。
+
+本地验证：`node frontend/scripts/verify-http.mjs`（11 项端到端用例覆盖
+以上各档与合并 / 顶替 / 重试 / 取消 / 退出失效）。
+
+### 本地开发与构建依赖约定
+
+- Node `>=18`（已写入 `frontend/package.json` 的 `engines`）；包管理器随
+  仓库 lockfile，使用 npm。
+- 运行依赖（dependencies）：`vue` / `vue-router` / `pinia`——请求层基于
+  原生 `fetch` + `AbortController`，**不引入** axios 等第二套 HTTP 库。
+- 构建依赖（devDependencies）：`vite` / `@vitejs/plugin-vue` / `typescript`
+  / `vue-tsc`；`npm run build` 先做 `vue-tsc --noEmit` 类型门禁再打包。
+- 本地环境变量写在 `frontend/.env.development`：`VITE_API_BASE`（留空走
+  vite 代理）、`VITE_HTTP_TIMEOUT`（请求超时毫秒，默认 10000）。
+
