@@ -10,6 +10,7 @@
         <button class="btn" type="button" @click="exportRows">导出使用登记清单</button>
       </div>
     </header>
+    <RequestNotice :notice-key="listKey" :loading="loading" :on-retry="reload" :on-cancel="cancel" />
 
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
@@ -35,6 +36,7 @@
         </tr>
       </thead>
       <tbody>
+        <tr v-if="loading && !rows.length"><td :colspan="columns.length + 1" class="empty-state">正在加载使用登记数据…</td></tr>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
@@ -49,82 +51,50 @@
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
+        <tr v-if="!loading && !rows.length">
           <td :colspan="columns.length + 1" class="empty-state">暂无使用登记数据，可先登记设备登记</td>
         </tr>
+        <tr v-if="hasMore"><td :colspan="columns.length + 1" class="empty-state"><button class="link" type="button" @click="loadMore">从断掉的那次接着取 / 加载更多</button></td></tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条使用登记记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="info">{{ info }}</span>
+      <RequestNotice :notice-key="'/api/register:action'" />
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
-
-type Row = Record<string, string | number | null>
+import RequestNotice from '@/components/RequestNotice.vue'
+import { useModulePage } from '@/composables/useModulePage'
 
 const ENDPOINT = '/api/register'
 const columns = ["设备编号", "设备名称", "设备种类", "使用单位", "安装地点", "投用日期", "登记证号", "登记状态"]
 const actions = ["办理登记", "申请停用", "申请注销"]
 const statuses = ["待登记", "已登记", "停用中", "已注销"]
 const stats = [{"label": "待登记设备", "value": 0}, {"label": "已登记设备", "value": 0}, {"label": "停用设备", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
-
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
-}
-
-function openCreate() {
-  errorMessage.value = '设备登记登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('使用登记动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '使用登记操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('设备登记列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '使用登记列表读取失败'
-  }
-}
+const {
+  filters,
+  info,
+  rows,
+  total,
+  loading,
+  hasMore,
+  listKey,
+  reload,
+  resetFilters,
+  loadMore,
+  cancel,
+  runAction,
+  exportRows,
+  openCreate,
+} = useModulePage({ endpoint: ENDPOINT, label: '使用登记' })
 
 onMounted(reload)
 </script>

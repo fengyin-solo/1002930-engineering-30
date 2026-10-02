@@ -1,6 +1,8 @@
 import { createRouter, createWebHistory } from 'vue-router'
 
+import { isAuthenticated } from '@/api/identity'
 import Dashboard from '@/views/Dashboard.vue'
+const Login = () => import('@/views/Login.vue')
 const Register = () => import('@/views/register/index.vue')
 const Boiler = () => import('@/views/boiler/index.vue')
 const Pressurevessel = () => import('@/views/pressurevessel/index.vue')
@@ -25,6 +27,7 @@ const Contract = () => import('@/views/contract/index.vue')
 const router = createRouter({
   history: createWebHistory(),
   routes: [
+    { path: '/login', name: 'login', component: Login, meta: { public: true } },
     { path: '/', name: 'dashboard', component: Dashboard },
     { path: '/register', name: 'register', component: Register },
     { path: '/boiler', name: 'boiler', component: Boiler },
@@ -47,6 +50,17 @@ const router = createRouter({
     { path: '/archive', name: 'archive', component: Archive },
     { path: '/contract', name: 'contract', component: Contract },
   ],
+})
+
+// 身份从 identity 一处判断；退出/失效后立刻只能进登录页
+router.beforeEach((to) => {
+  if (!to.meta.public && !isAuthenticated()) {
+    return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : undefined }
+  }
+  if (to.name === 'login' && isAuthenticated()) {
+    return { path: '/' }
+  }
+  return true
 })
 
 export default router

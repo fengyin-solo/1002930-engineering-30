@@ -10,6 +10,7 @@
         <button class="btn" type="button" @click="exportRows">导出培训考核清单</button>
       </div>
     </header>
+    <RequestNotice :notice-key="listKey" :loading="loading" :on-retry="reload" :on-cancel="cancel" />
 
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
@@ -35,6 +36,7 @@
         </tr>
       </thead>
       <tbody>
+        <tr v-if="loading && !rows.length"><td :colspan="columns.length + 1" class="empty-state">正在加载培训考核数据…</td></tr>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
@@ -49,82 +51,50 @@
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
+        <tr v-if="!loading && !rows.length">
           <td :colspan="columns.length + 1" class="empty-state">暂无培训考核数据，可先登记培训记录</td>
         </tr>
+        <tr v-if="hasMore"><td :colspan="columns.length + 1" class="empty-state"><button class="link" type="button" @click="loadMore">从断掉的那次接着取 / 加载更多</button></td></tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条培训考核记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="info">{{ info }}</span>
+      <RequestNotice :notice-key="'/api/training:action'" />
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
-
-type Row = Record<string, string | number | null>
+import RequestNotice from '@/components/RequestNotice.vue'
+import { useModulePage } from '@/composables/useModulePage'
 
 const ENDPOINT = '/api/training'
 const columns = ["培训编号", "培训内容", "培训对象", "培训日期", "培训讲师", "考核方式", "考核结果", "培训状态"]
 const actions = ["组织培训", "组织考核", "归档"]
 const statuses = ["待培训", "培训中", "已考核", "已归档"]
 const stats = [{"label": "待培训人数", "value": 0}, {"label": "已考核人数", "value": 0}, {"label": "合格率", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
-
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
-}
-
-function openCreate() {
-  errorMessage.value = '培训记录登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('培训考核动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '培训考核操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('培训记录列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '培训考核列表读取失败'
-  }
-}
+const {
+  filters,
+  info,
+  rows,
+  total,
+  loading,
+  hasMore,
+  listKey,
+  reload,
+  resetFilters,
+  loadMore,
+  cancel,
+  runAction,
+  exportRows,
+  openCreate,
+} = useModulePage({ endpoint: ENDPOINT, label: '培训考核' })
 
 onMounted(reload)
 </script>

@@ -10,6 +10,7 @@
         <button class="btn" type="button" @click="exportRows">导出压力管道清单</button>
       </div>
     </header>
+    <RequestNotice :notice-key="listKey" :loading="loading" :on-retry="reload" :on-cancel="cancel" />
 
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
@@ -35,6 +36,7 @@
         </tr>
       </thead>
       <tbody>
+        <tr v-if="loading && !rows.length"><td :colspan="columns.length + 1" class="empty-state">正在加载压力管道数据…</td></tr>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
@@ -49,82 +51,50 @@
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
+        <tr v-if="!loading && !rows.length">
           <td :colspan="columns.length + 1" class="empty-state">暂无压力管道数据，可先登记压力管道</td>
         </tr>
+        <tr v-if="hasMore"><td :colspan="columns.length + 1" class="empty-state"><button class="link" type="button" @click="loadMore">从断掉的那次接着取 / 加载更多</button></td></tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条压力管道记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="info">{{ info }}</span>
+      <RequestNotice :notice-key="'/api/pipeline:action'" />
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
-
-type Row = Record<string, string | number | null>
+import RequestNotice from '@/components/RequestNotice.vue'
+import { useModulePage } from '@/composables/useModulePage'
 
 const ENDPOINT = '/api/pipeline'
 const columns = ["管道编号", "管道级别", "设计压力", "输送介质", "管道长度", "敷设方式", "检验日期", "管道状态"]
 const actions = ["记录减薄", "安排检验", "申请报废"]
 const statuses = ["正常", "壁厚减薄", "待检验", "已报废"]
 const stats = [{"label": "正常管道", "value": 0}, {"label": "减薄管道", "value": 0}, {"label": "待检验管道", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
-
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
-}
-
-function openCreate() {
-  errorMessage.value = '压力管道登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('压力管道动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '压力管道操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('压力管道列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '压力管道列表读取失败'
-  }
-}
+const {
+  filters,
+  info,
+  rows,
+  total,
+  loading,
+  hasMore,
+  listKey,
+  reload,
+  resetFilters,
+  loadMore,
+  cancel,
+  runAction,
+  exportRows,
+  openCreate,
+} = useModulePage({ endpoint: ENDPOINT, label: '压力管道' })
 
 onMounted(reload)
 </script>

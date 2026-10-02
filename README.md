@@ -45,6 +45,52 @@ npm run dev
 前端默认监听 `http://127.0.0.1:5173/`，dev server 不会自动打开浏览器，
 需要自己访问。`/api` 由 vite 代理到后端 `http://127.0.0.1:8000`。
 
+### 本地开发与构建依赖约定
+
+- Node 版本：`>=18`（见 `frontend/package.json` 的 `engines`）。首次开发 `npm install`，
+  不额外引入请求库：HTTP 统一基于原生 `fetch` + `AbortController` 实现，无第三方运行时依赖。
+- 依赖分档：Vue / Vue Router / Pinia 放在 `dependencies`；Vite、TypeScript、vue-tsc、
+  插件与类型声明放在 `devDependencies`。新增依赖前先评估能否用原生能力替代。
+- 常用命令：`npm run dev`（本地开发）、`npm run typecheck`（仅类型检查）、
+  `npm run build`（先 `vue-tsc --noEmit` 再产物构建，CI 与发版用同一条）。
+- 请求相关环境变量（`.env.development` 本地、`.env.production` 构建）：
+
+  | 变量 | 默认 | 说明 |
+  | --- | --- | --- |
+  | `VITE_API_BASE` | 空（同源/代理） | 接口前缀，留空时走 vite 代理或同源网关 |
+  | `VITE_HTTP_TIMEOUT` | `10000` | 单次请求超时毫秒数，超时归「超时」档 |
+  | `VITE_HTTP_RETRIES` | `2` | 断网/超时/5xx/429 的额外重试次数，指数退避 300ms 起、上限 2s |
+
+## 请求层约定（所有页面共用一份实现）
+
+所有页面禁止各自 `fetch` / 各自编造错误文案，统一走 `src/api` 与 `src/composables`：
+
+- 入口：`src/api/client.ts` 暴露 `request` / `fetchJson` / `postJson`，兼容旧签名
+  （`fetchJson<T>(path)` 仍可用，行为已升级），页面层一般用 `useModulePage` /
+  `useAsyncResource` / `useModuleList`，不要直接 new fetch。
+- 错误分档（`src/api/errors.ts`）：`timeout`（超时）、`offline`（断网/网络不可达）、
+  `http`（非 2xx，含 401/4xx/5xx）、`business`（HTTP 200 但 `{ok:false}`，动作接口的业务拒绝）、
+  `aborted`（主动取消）。非 200 一律抛错，绝不继续当成功往下走；200 但 `ok:false` 同样抛业务异常。
+- 统一回显：原因只写进 Pinia 的 notice store（`src/stores/notice.ts`），页面用
+  `src/components/RequestNotice.vue` 按 `noticeKey` 读同一份；其他页面/组件用同一个 key
+  读到的就是出错处写入的那句，全局最近一次原因可取 `notices.latest`。不再吞错留白。
+- 超时/断网/5xx/429 自动重试（退避可被取消打断）；重试与取消共用同一套 `AbortController`。
+- 取消：页面卸载自动取消在途请求；`RequestNotice` 上的「重试/取消」走同一套信号。
+- 可续取列表：`src/api/resumable.ts` 的 `ResumableList` 按页拉，某页失败时已取数据保留、
+  游标停在没取到的页，再调 `resume()`/页面上的「接着取」只重发那一页。
+- 并发去重：相同的在途 GET 自动合并只发一次；提交型请求传同一个 `dedupeKey`
+  （页面按「模块+记录+动作」生成）即可同一动作并发只放行一次，连点不重复提交。
+- 导出等下载也走统一 `request`（带身份头、统一错误处理），不再用 `window.open` 绕过请求层。
+
+## 会话（身份）约定
+
+- 身份只有一处：`src/api/identity.ts`。请求头的令牌与页面显示的值班信息都从这里取，
+  持久化只写 `localStorage` 的 `sq_session` 一个键，页面状态（`stores/session.ts`）只是只读视图。
+- 退出 `logout()`（或服务端 401 触发 `invalidate()`）立即清令牌与持久化、广播失效：
+  之后请求不再带身份，全部在途请求立刻取消，路由守卫把页面打回登录页。
+- 本地开发可用 `/login` 页面「值班人员 + 留空令牌」生成一次性本地令牌；接入真实鉴权时
+  把登录处换成后端登录接口即可，请求层与页面不用动。
+
 ## 业务模块
 
 | 模块 | 目录 | 业务对象 | 主要字段 |

@@ -10,6 +10,7 @@
         <button class="btn" type="button" @click="exportRows">导出安全阀校验清单</button>
       </div>
     </header>
+    <RequestNotice :notice-key="listKey" :loading="loading" :on-retry="reload" :on-cancel="cancel" />
 
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
@@ -35,6 +36,7 @@
         </tr>
       </thead>
       <tbody>
+        <tr v-if="loading && !rows.length"><td :colspan="columns.length + 1" class="empty-state">正在加载安全阀校验数据…</td></tr>
         <tr v-for="row in rows" :key="String(row.id)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
           <td class="row-actions">
@@ -49,82 +51,50 @@
             </button>
           </td>
         </tr>
-        <tr v-if="!rows.length">
+        <tr v-if="!loading && !rows.length">
           <td :colspan="columns.length + 1" class="empty-state">暂无安全阀校验数据，可先登记安全阀</td>
         </tr>
+        <tr v-if="hasMore"><td :colspan="columns.length + 1" class="empty-state"><button class="link" type="button" @click="loadMore">从断掉的那次接着取 / 加载更多</button></td></tr>
       </tbody>
     </table>
 
     <footer class="page-foot">
       <span>共 {{ total }} 条安全阀校验记录</span>
-      <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
+      <span v-if="info">{{ info }}</span>
+      <RequestNotice :notice-key="'/api/safetyvalve:action'" />
     </footer>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted } from 'vue'
 
-import { request } from '@/api/client'
-
-type Row = Record<string, string | number | null>
+import RequestNotice from '@/components/RequestNotice.vue'
+import { useModulePage } from '@/composables/useModulePage'
 
 const ENDPOINT = '/api/safetyvalve'
 const columns = ["安全阀编号", "所属设备", "公称通径", "整定压力", "校验日期", "下次校验日", "校验结论", "安全阀状态"]
 const actions = ["安排校验", "登记合格", "申请报废"]
 const statuses = ["校验合格", "即将到期", "待校验", "已报废"]
 const stats = [{"label": "合格安全阀", "value": 0}, {"label": "待校验阀", "value": 0}, {"label": "报废阀", "value": 0}]
-
-const rows = ref<Row[]>([])
-const total = ref(0)
-const errorMessage = ref('')
-const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
 
-function resetFilters() {
-  filters.value = {}
-  void reload()
-}
-
-function exportRows() {
-  window.open(`${ENDPOINT}/export`, '_blank')
-}
-
-function openCreate() {
-  errorMessage.value = '安全阀登记入口尚未接入审批流'
-}
-
-async function runAction(action: string, row: Row) {
-  errorMessage.value = ''
-  try {
-    const response = await request(`${ENDPOINT}/${row.id}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ action }),
-    })
-    if (!response.ok) {
-      throw new Error('安全阀校验动作未生效，请稍后重试')
-    }
-    await reload()
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '安全阀校验操作失败'
-  }
-}
-
-async function reload() {
-  errorMessage.value = ''
-  const query = new URLSearchParams(filters.value as Record<string, string>).toString()
-  try {
-    const response = await request(`${ENDPOINT}?${query}`)
-    if (!response.ok) {
-      throw new Error('安全阀列表读取失败')
-    }
-    const payload = await response.json()
-    rows.value = payload.items ?? []
-    total.value = payload.total ?? rows.value.length
-  } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '安全阀校验列表读取失败'
-  }
-}
+const {
+  filters,
+  info,
+  rows,
+  total,
+  loading,
+  hasMore,
+  listKey,
+  reload,
+  resetFilters,
+  loadMore,
+  cancel,
+  runAction,
+  exportRows,
+  openCreate,
+} = useModulePage({ endpoint: ENDPOINT, label: '安全阀校验' })
 
 onMounted(reload)
 </script>
